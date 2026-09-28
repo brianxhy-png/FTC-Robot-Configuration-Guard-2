@@ -1,0 +1,67 @@
+{
+  "devices": [
+    {
+      "name": "frontLeft",
+      "type": "DcMotorEx",
+      "hub": "Control Hub",
+      "port_type": "motor",
+      "port": 0
+    },
+    {
+      "name": "frontRight",
+      "type": "DcMotorEx",
+      "hub": "Control Hub",
+      "port_type": "motor",
+      "port": 1
+    },
+    {
+      "name": "backLeft",
+      "type": "DcMotorEx",
+      "hub": "Control Hub",
+      "port_type": "motor",
+      "port": 2
+    },
+    {
+      "name": "backRight",
+      "type": "DcMotorEx",
+      "hub": "Control Hub",
+      "port_type": "motor",
+      "port": 3
+    },
+    {
+      "name": "flywheel",
+      "type": "DcMotorEx",
+      "hub": "Expansion Hub",
+      "port_type": "motor",
+      "port": 0
+    },
+    {
+      "name": "intakeMotor",
+      "type": "DcMotorEx",
+      "hub": "Expansion Hub",
+      "port_type": "motor",
+      "port": 1
+    },
+    {
+      "name": "turretMotor",
+      "type": "DcMotorEx",
+      "hub": "Expansion Hub",
+      "port_type": "motor",
+      "port": 2
+    },
+    {
+      "name": "feeder",
+      "type": "Servo",
+      "hub": "Expansion Hub",
+      "port_type": "servo",
+      "port": 0
+    },
+    {
+      "name": "limelight",
+      "type": "Limelight3A",
+      "hub": "Control Hub",
+      "port_type": "usb",
+      "port": 0
+    }
+  ]
+}

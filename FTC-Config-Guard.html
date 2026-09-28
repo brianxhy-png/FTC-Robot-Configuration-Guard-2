@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FTC Robot Configuration Guard</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07111f;
+      --panel: #101d2f;
+      --panel-2: #14243a;
+      --text: #edf5ff;
+      --muted: #9db0c8;
+      --line: #2b405c;
+      --blue: #43a6ff;
+      --green: #43d17a;
+      --yellow: #ffc857;
+      --red: #ff6474;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font: 16px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top right, #153a63 0, transparent 35%), var(--bg);
+    }
+    main { width: min(1080px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 72px; }
+    header { margin-bottom: 28px; }
+    .eyebrow { color: var(--blue); font-weight: 800; letter-spacing: .12em; text-transform: uppercase; font-size: 12px; }
+    h1 { margin: 8px 0 8px; font-size: clamp(32px, 6vw, 56px); line-height: 1.04; }
+    .lead { max-width: 760px; color: var(--muted); font-size: 18px; margin: 0; }
+    .privacy { display: inline-flex; gap: 8px; align-items: center; margin-top: 16px; color: var(--green); font-weight: 700; }
+    .panel {
+      background: rgba(16, 29, 47, .94);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 24px;
+      box-shadow: 0 18px 60px rgba(0, 0, 0, .24);
+    }
+    .setup { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .picker {
+      display: block;
+      min-height: 158px;
+      padding: 20px;
+      border: 1px dashed #4d6b8e;
+      border-radius: 14px;
+      background: var(--panel-2);
+      cursor: pointer;
+      transition: border-color .15s, transform .15s;
+    }
+    .picker:hover { border-color: var(--blue); transform: translateY(-1px); }
+    .step { color: var(--blue); font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+    .picker strong { display: block; margin: 7px 0 5px; font-size: 19px; }
+    .picker small { color: var(--muted); display: block; }
+    .file-state { margin-top: 14px; color: #d8e9ff; font-weight: 700; overflow-wrap: anywhere; }
+    input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    .controls { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-top: 20px; }
+    button {
+      border: 0;
+      border-radius: 11px;
+      padding: 12px 18px;
+      font: inherit;
+      font-weight: 850;
+      cursor: pointer;
+      background: var(--blue);
+      color: #04111f;
+    }
+    button.secondary { background: #243a56; color: var(--text); border: 1px solid #3c5676; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .check { color: var(--muted); display: flex; gap: 8px; align-items: center; }
+    .status { margin-left: auto; color: var(--muted); }
+    #results { margin-top: 22px; }
+    .summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 18px; }
+    .metric { padding: 16px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 13px; }
+    .metric span { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; }
+    .metric strong { display: block; font-size: 30px; margin-top: 2px; }
+    .metric.error strong { color: var(--red); }
+    .metric.warning strong { color: var(--yellow); }
+    .metric.pass strong { color: var(--green); }
+    .result-header { display: flex; gap: 14px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .result-header h2 { margin: 0; }
+    .group { margin-top: 18px; }
+    .group h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: .06em; }
+    .finding { padding: 13px 15px; margin: 8px 0; border-left: 4px solid var(--line); background: #0c1828; border-radius: 8px; overflow-wrap: anywhere; }
+    .finding b { font-size: 12px; letter-spacing: .05em; margin-right: 8px; }
+    .finding.error { border-color: var(--red); }
+    .finding.warning { border-color: var(--yellow); }
+    .finding.info { border-color: var(--blue); }
+    .finding.pass { border-color: var(--green); }
+    .empty { color: var(--muted); text-align: center; padding: 25px; }
+    .hidden { display: none; }
+    footer { color: var(--muted); font-size: 13px; margin-top: 18px; }
+    code { color: #a8d6ff; }
+    @media (max-width: 760px) {
+      .setup { grid-template-columns: 1fr; }
+      .summary { grid-template-columns: repeat(2, 1fr); }
+      .status { width: 100%; margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">FTC development tool</div>
+    <h1>Robot Configuration Guard</h1>
+    <p class="lead">Compare hardware names in TeamCode with the robot's hub configuration before initialization.</p>
+    <div class="privacy">● Runs locally — selected files never leave your browser</div>
+  </header>
+
+  <section class="panel">
+    <div class="setup">
+      <label class="picker" for="repoInput">
+        <span class="step">Step 1</span>
+        <strong>Choose the FTC repository</strong>
+        <small>Select the complete <code>ClonedFTCController</code> folder. The scanner uses Java files inside TeamCode.</small>
+        <div id="repoState" class="file-state">No folder selected</div>
+        <input id="repoInput" type="file" webkitdirectory directory multiple>
+      </label>
+
+      <label class="picker" for="configInput">
+        <span class="step">Step 2</span>
+        <strong>Choose the robot configuration</strong>
+        <small>Select an FTC configuration XML export or the included JSON/CSV wiring list.</small>
+        <div id="configState" class="file-state">No configuration selected</div>
+        <input id="configInput" type="file" accept=".json,.csv,.xml">
+      </label>
+    </div>
+
+    <div class="controls">
+      <button id="runButton" disabled>Run configuration scan</button>
+      <button id="clearButton" class="secondary" type="button">Clear</button>
+      <label class="check"><input id="teamCodeOnly" type="checkbox" checked> Scan TeamCode only</label>
+      <span id="status" class="status">Choose both inputs to begin.</span>
+    </div>
+  </section>
+
+  <section id="results" class="panel hidden">
+    <div class="result-header">
+      <h2 id="resultTitle">Scan results</h2>
+      <button id="downloadButton" class="secondary">Download Markdown report</button>
+    </div>
+    <div class="summary">
+      <div class="metric error"><span>Errors</span><strong id="errorCount">0</strong></div>
+      <div class="metric warning"><span>Warnings</span><strong id="warningCount">0</strong></div>
+      <div class="metric pass"><span>Passed</span><strong id="passCount">0</strong></div>
+      <div class="metric"><span>Java mappings</span><strong id="mappingCount">0</strong></div>
+      <div class="metric"><span>Config devices</span><strong id="deviceCount">0</strong></div>
+    </div>
+    <div id="findingList"></div>
+  </section>
+
+  <footer>Configuration agreement does not prove correct physical wiring, motor direction, encoder direction, PID tuning, or mechanism performance.</footer>
+</main>
+
+<script>
+  const repoInput = document.querySelector('#repoInput');
+  const configInput = document.querySelector('#configInput');
+  const runButton = document.querySelector('#runButton');
+  const clearButton = document.querySelector('#clearButton');
+  const downloadButton = document.querySelector('#downloadButton');
+  const teamCodeOnly = document.querySelector('#teamCodeOnly');
+  const results = document.querySelector('#results');
+  let lastReport = '';
+
+  const aliases = {
+    dcmotor: 'motor', dcmotorex: 'motor', motor: 'motor', lynxmotor: 'motor',
+    servo: 'servo', standardservo: 'servo', crservo: 'crservo', continuousrotationservo: 'crservo',
+    limelight3a: 'limelight', limelight: 'limelight', webcamname: 'camera', webcam: 'camera', camera: 'camera',
+    imu: 'imu', bno055imu: 'imu', colorsensor: 'color_sensor', normalizedcolorsensor: 'color_sensor',
+    revcolorsensorv3: 'color_sensor', distancesensor: 'distance_sensor', digitalchannel: 'digital',
+    analoginput: 'analog', touchsensor: 'touch_sensor', voltagesensor: 'voltage_sensor',
+    lynxi2cdevice: 'i2c_sensor'
+  };
+  const legacyTypes = {
+    dcmotor: 'DcMotor', dcmotorex: 'DcMotorEx', servo: 'Servo', crservo: 'CRServo',
+    colorsensor: 'ColorSensor', distancesensor: 'DistanceSensor', digitalchannel: 'DigitalChannel',
+    analoginput: 'AnalogInput', touchsensor: 'TouchSensor'
+  };
+  const containers = new Set(['robot','lynxusbdevice','lynxmodule','module','hub','deviceinterfacemodule','motorcontroller','servocontroller']);
+
+  function typeCategory(value) {
+    const cleaned = String(value || 'unknown').split('.').pop().replace(/<.*>/g, '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+    return aliases[cleaned] || cleaned;
+  }
+
+  function stripComments(text) {
+    return text.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, match => match.replace(/[^\n]/g, ' '));
+  }
+
+  function lineAt(text, offset) {
+    return text.slice(0, offset).split('\n').length;
+  }
+
+  function updateReady() {
+    const javaCount = [...repoInput.files].filter(file => file.name.endsWith('.java')).length;
+    const folder = repoInput.files[0]?.webkitRelativePath?.split('/')[0] || '';
+    document.querySelector('#repoState').textContent = folder ? `${folder} — ${javaCount} Java files available` : 'No folder selected';
+    document.querySelector('#configState').textContent = configInput.files[0]?.name || 'No configuration selected';
+    runButton.disabled = !javaCount || !configInput.files.length;
+    document.querySelector('#status').textContent = runButton.disabled ? 'Choose both inputs to begin.' : 'Ready to scan.';
+  }
+
+  repoInput.addEventListener('change', updateReady);
+  configInput.addEventListener('change', updateReady);
+
+  async function scanJava(files) {
+    let javaFiles = [...files].filter(file => file.name.endsWith('.java') && !/(^|\/)(build|\.gradle|\.git)(\/|$)/.test(file.webkitRelativePath));
+    if (teamCodeOnly.checked) {
+      const selected = javaFiles.filter(file => /(^|\/)TeamCode\//.test(file.webkitRelativePath));
+      if (selected.length) javaFiles = selected;
+    }
+
+    const sources = [];
+    const constants = new Map();
+    const conflicts = new Set();
+    const constantRe = /\b(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:final\s+)?String\s+([A-Za-z_$][\w$]*)\s*=\s*"([^"]+)"/g;
+
+    for (const file of javaFiles) {
+      const text = stripComments(await file.text());
+      sources.push({file, text});
+      for (const match of text.matchAll(constantRe)) {
+        if (constants.has(match[1]) && constants.get(match[1]) !== match[2]) conflicts.add(match[1]);
+        else constants.set(match[1], match[2]);
+      }
+    }
+    conflicts.forEach(name => constants.delete(name));
+
+    const devices = [];
+    const findings = [];
+    const modern = /\b(?:hardwareMap|hwMap)\s*\.\s*get\s*\(\s*([A-Za-z_$][\w$<>.]*)\s*\.\s*class\s*,\s*([^,)]+)/g;
+    const legacy = /\b(?:hardwareMap|hwMap)\s*\.\s*([A-Za-z_$][\w$]*)\s*\.\s*get\s*\(\s*"([^"]+)"\s*\)/g;
+
+    for (const source of sources) {
+      for (const match of source.text.matchAll(modern)) {
+        const expression = match[2].trim();
+        const quoted = expression.match(/^"([^"]+)"$/);
+        const identifier = expression.match(/([A-Za-z_$][\w$]*)\s*$/);
+        const name = quoted?.[1] || (identifier ? constants.get(identifier[1]) : null);
+        const location = `${source.file.webkitRelativePath}:${lineAt(source.text, match.index)}`;
+        if (!name) {
+          findings.push({severity:'INFO', code:'DYNAMIC_NAME', message:`Could not resolve hardware name expression '${expression}' in ${location}.`});
+        } else {
+          devices.push({name, type:match[1].split('.').pop().replace(/<.*>/g,''), file:source.file.webkitRelativePath, line:lineAt(source.text, match.index)});
+        }
+      }
+      for (const match of source.text.matchAll(legacy)) {
+        devices.push({name:match[2], type:legacyTypes[match[1].toLowerCase()] || match[1], file:source.file.webkitRelativePath, line:lineAt(source.text, match.index)});
+      }
+    }
+    return {devices, findings, scannedFiles: javaFiles.length};
+  }
+
+  function parseCSV(text) {
+    const rows = [];
+    let row = [], field = '', quoted = false;
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      if (char === '"' && quoted && text[i + 1] === '"') { field += '"'; i++; }
+      else if (char === '"') quoted = !quoted;
+      else if (char === ',' && !quoted) { row.push(field); field = ''; }
+      else if ((char === '\n' || char === '\r') && !quoted) {
+        if (char === '\r' && text[i + 1] === '\n') i++;
+        row.push(field); if (row.some(value => value.trim())) rows.push(row); row = []; field = '';
+      } else field += char;
+    }
+    if (field || row.length) { row.push(field); rows.push(row); }
+    const headers = (rows.shift() || []).map(value => value.trim());
+    return rows.map(values => Object.fromEntries(headers.map((header, index) => [header, (values[index] || '').trim()])));
+  }
+
+  function parseXML(text) {
+    const documentXml = new DOMParser().parseFromString(text, 'application/xml');
+    if (documentXml.querySelector('parsererror')) throw new Error('The selected XML file could not be parsed.');
+    const devices = [];
+    function visit(element, currentHub = '') {
+      const tag = element.localName || element.tagName;
+      const lower = tag.toLowerCase();
+      const name = element.getAttribute('name') || '';
+      let nextHub = currentHub;
+      if (['lynxmodule','module','hub'].includes(lower) && name) nextHub = name;
+      if (name && !containers.has(lower)) {
+        devices.push({name, type:tag, hub:currentHub, portType:typeCategory(tag), port:element.getAttribute('port') || element.getAttribute('bus') || ''});
+      }
+      [...element.children].forEach(child => visit(child, nextHub));
+    }
+    visit(documentXml.documentElement);
+    return devices;
+  }
+
+  async function loadConfig(file) {
+    const text = await file.text();
+    const extension = file.name.split('.').pop().toLowerCase();
+    if (extension === 'json') {
+      const parsed = JSON.parse(text);
+      const rows = Array.isArray(parsed) ? parsed : parsed.devices;
+      if (!Array.isArray(rows)) throw new Error('JSON must contain a devices array.');
+      return rows.map(row => ({name:String(row.name), type:String(row.type || row.device_type || 'unknown'), hub:String(row.hub || ''), portType:String(row.port_type || ''), port:String(row.port ?? '')}));
+    }
+    if (extension === 'csv') return parseCSV(text).map(row => ({name:row.name, type:row.type || row.device_type || 'unknown', hub:row.hub || '', portType:row.port_type || '', port:String(row.port || '')})).filter(row => row.name);
+    if (extension === 'xml') return parseXML(text);
+    throw new Error('Configuration must be JSON, CSV, or XML.');
+  }
+
+  function levenshtein(a, b) {
+    a = a.toLowerCase(); b = b.toLowerCase();
+    const matrix = Array.from({length:a.length + 1}, (_, i) => [i]);
+    for (let j = 1; j <= b.length; j++) matrix[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+      matrix[i][j] = Math.min(matrix[i-1][j] + 1, matrix[i][j-1] + 1, matrix[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    }
+    return matrix[a.length][b.length];
+  }
+
+  function closeNames(name, candidates) {
+    return [...candidates].map(candidate => ({candidate, score:1 - levenshtein(name, candidate) / Math.max(name.length, candidate.length, 1)}))
+      .filter(item => item.score >= .48).sort((a,b) => b.score - a.score).slice(0,3).map(item => item.candidate);
+  }
+
+  function analyze(codeDevices, configDevices) {
+    const findings = [];
+    const code = new Map(), config = new Map();
+    codeDevices.forEach(item => { if (!code.has(item.name)) code.set(item.name, []); code.get(item.name).push(item); });
+    configDevices.forEach(item => { if (!config.has(item.name)) config.set(item.name, []); config.get(item.name).push(item); });
+
+    for (const [name, items] of code) if (!config.has(name)) {
+      const suggestions = closeNames(name, config.keys());
+      const locations = items.slice(0,4).map(item => `${item.file}:${item.line}`).join(', ');
+      findings.push({severity:'ERROR', code:'MISSING_CONFIG_DEVICE', message:`Code requires '${name}' (${locations}), but it is absent from the configuration.${suggestions.length ? ` Possible match: ${suggestions.join(', ')}.` : ''}`});
+    }
+    for (const [name, items] of config) if (!code.has(name)) findings.push({severity:'WARNING', code:'UNUSED_CONFIG_DEVICE', message:`Configuration contains '${name}' (${items[0].type}), but no scanned Java mapping uses it.`});
+
+    for (const [name, codeItems] of code) if (config.has(name)) {
+      const codeTypes = new Set(codeItems.map(item => typeCategory(item.type)));
+      const configTypes = new Set(config.get(name).map(item => typeCategory(item.type)));
+      if (codeTypes.size > 1) findings.push({severity:'ERROR', code:'CONFLICTING_CODE_TYPES', message:`'${name}' is requested as multiple code types: ${[...codeTypes].join(', ')}.`});
+      if (![...codeTypes].some(type => configTypes.has(type))) findings.push({severity:'ERROR', code:'TYPE_MISMATCH', message:`'${name}' is ${[...codeTypes].join(', ')} in code but ${[...configTypes].join(', ')} in the configuration.`});
+      else findings.push({severity:'PASS', code:'MATCHED_DEVICE', message:`'${name}' exists with a compatible type (${[...codeTypes].join(', ')}).`});
+    }
+
+    for (const [name, items] of config) if (items.length > 1) findings.push({severity:'ERROR', code:'DUPLICATE_CONFIG_NAME', message:`Configuration name '${name}' appears more than once.`});
+    const ports = new Map();
+    configDevices.forEach(item => {
+      if (!item.hub || item.port === '') return;
+      const key = `${item.hub}\u0000${item.portType || typeCategory(item.type)}\u0000${item.port}`;
+      if (!ports.has(key)) ports.set(key, []);
+      ports.get(key).push(item);
+    });
+    for (const [key, items] of ports) if (items.length > 1) {
+      const [hub, portType, port] = key.split('\u0000');
+      findings.push({severity:'ERROR', code:'DUPLICATE_PORT', message:`${hub} ${portType} port ${port} is assigned to: ${items.map(item => item.name).join(', ')}.`});
+    }
+    const order = {ERROR:0, WARNING:1, INFO:2, PASS:3};
+    return findings.sort((a,b) => order[a.severity] - order[b.severity] || a.code.localeCompare(b.code));
+  }
+
+  function counts(findings) {
+    return findings.reduce((out, item) => (out[item.severity]++, out), {ERROR:0,WARNING:0,INFO:0,PASS:0});
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+  }
+
+  function showResults(findings, codeDevices, configDevices, scannedFiles, repoName, configName) {
+    const totals = counts(findings);
+    document.querySelector('#errorCount').textContent = totals.ERROR;
+    document.querySelector('#warningCount').textContent = totals.WARNING;
+    document.querySelector('#passCount').textContent = totals.PASS;
+    document.querySelector('#mappingCount').textContent = codeDevices.length;
+    document.querySelector('#deviceCount').textContent = configDevices.length;
+    document.querySelector('#resultTitle').textContent = totals.ERROR ? 'Configuration needs attention' : 'Configuration passed';
+    const list = document.querySelector('#findingList');
+    list.innerHTML = '';
+    for (const severity of ['ERROR','WARNING','INFO','PASS']) {
+      const selected = findings.filter(item => item.severity === severity);
+      if (!selected.length) continue;
+      const group = document.createElement('div');
+      group.className = 'group';
+      group.innerHTML = `<h3>${severity} (${selected.length})</h3>` + selected.map(item => `<div class="finding ${severity.toLowerCase()}"><b>${escapeHtml(item.code)}</b>${escapeHtml(item.message)}</div>`).join('');
+      list.appendChild(group);
+    }
+    if (!findings.length) list.innerHTML = '<div class="empty">No mappings or findings were discovered.</div>';
+    results.classList.remove('hidden');
+    const lines = [
+      '# FTC Robot Configuration Guard Report','',`**Status:** ${totals.ERROR ? 'FAIL' : 'PASS'}`,'',
+      `- Repository: \`${repoName}\``,`- Configuration: \`${configName}\``,`- Java files scanned: **${scannedFiles}**`,
+      `- Java hardware mappings found: **${codeDevices.length}**`,`- Configured devices found: **${configDevices.length}**`,
+      `- Errors: **${totals.ERROR}**`,`- Warnings: **${totals.WARNING}**`,`- Compatible devices: **${totals.PASS}**`,''
+    ];
+    for (const severity of ['ERROR','WARNING','INFO','PASS']) {
+      const selected = findings.filter(item => item.severity === severity);
+      if (!selected.length) continue;
+      lines.push(`## ${severity[0] + severity.slice(1).toLowerCase()}`,'');
+      selected.forEach(item => lines.push(`- **${item.code}:** ${item.message}`));
+      lines.push('');
+    }
+    lastReport = lines.join('\n');
+  }
+
+  runButton.addEventListener('click', async () => {
+    runButton.disabled = true;
+    document.querySelector('#status').textContent = 'Scanning Java and configuration files…';
+    try {
+      const scanned = await scanJava(repoInput.files);
+      const configured = await loadConfig(configInput.files[0]);
+      const findings = [...analyze(scanned.devices, configured), ...scanned.findings];
+      const repoName = repoInput.files[0]?.webkitRelativePath?.split('/')[0] || 'Selected repository';
+      showResults(findings, scanned.devices, configured, scanned.scannedFiles, repoName, configInput.files[0].name);
+      const totals = counts(findings);
+      document.querySelector('#status').textContent = totals.ERROR ? `Finished — ${totals.ERROR} error(s) found.` : 'Finished — no configuration errors found.';
+      results.scrollIntoView({behavior:'smooth', block:'start'});
+    } catch (error) {
+      document.querySelector('#status').textContent = `Could not scan: ${error.message}`;
+    } finally {
+      updateReady();
+    }
+  });
+
+  clearButton.addEventListener('click', () => {
+    repoInput.value = '';
+    configInput.value = '';
+    results.classList.add('hidden');
+    lastReport = '';
+    updateReady();
+  });
+
+  downloadButton.addEventListener('click', () => {
+    const blob = new Blob([lastReport], {type:'text/markdown'});
+    const url = URL.createObjectURL(blob);
+    const link = Object.assign(document.createElement('a'), {href:url, download:'ftc-configuration-report.md'});
+    link.click();
+    URL.revokeObjectURL(url);
+  });
+</script>
+</body>
+</html>
