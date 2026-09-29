@@ -1,145 +1,72 @@
 # FTC Robot Configuration Guard
 
-Catch hardware-name, device-type, and port-assignment mistakes before an FTC
-OpMode initializes.
+A local preflight check for FTC hardware configuration. Compare Java `hardwareMap` requests with a JSON/CSV wiring list or an FTC Robot Controller XML export, inspect hub ports, and review what changed since a previous robot configuration.
 
-The tool scans Java source for FTC hardware mappings such as:
+**Use it before deploying new code or after changing wiring.** The Robot Controller can already report an unavailable hardware name when an OpMode initializes. This tool scans the repository ahead of time and points to the source file and line, so a team can review many OpModes in one pass. It also compares configuration snapshots and audits duplicate names and hub ports. It does not connect to the robot or certify hardware health.
 
-```java
-flywheel = hardwareMap.get(DcMotorEx.class, "flywheel");
-feeder = hardwareMap.get(Servo.class, RobotConfig.FEEDER_NAME);
-```
+## Open the app
 
-It compares them with a robot configuration supplied as:
+- **Local:** download the repository ZIP, unzip it, and double-click [`index.html`](index.html). No installation, account, Python, or server is needed.
+- **GitHub Pages:** repository owner can enable **Settings → Pages → Deploy from a branch → main → /(root)**. Then open `https://brianxhy-png.github.io/FTC-Robot-Configuration-Guard-2/`. The `index.html` in the root is ready to publish. This URL will work only after Pages is enabled.
 
-- A manual JSON wiring list
-- A CSV wiring list
-- An FTC Robot Controller configuration XML export
+Select the **FTC repository folder** that contains the team's Java code, then the **active robot configuration** XML/JSON/CSV file. Optionally add a *previous known-good configuration* to see differences. Click **Run configuration scan**. Browse findings, inspect the wiring map, or download Markdown and JSON reports. The files are read by your browser on your device; the app has no upload endpoint.
 
-It reports:
+Try it without team files: choose the [`demo`](demo) folder for the repository and [`example_robot_config.json`](example_robot_config.json) for the configuration. The included sample intentionally contains problems so you can see the diagnostics.
 
-- Hardware names required by code but missing from the configuration
-- Configuration devices that are not mapped by scanned Java code
-- Motor/servo/sensor type mismatches
-- One name requested as conflicting types in different Java files
-- Duplicate configuration names
-- Multiple devices assigned to the same hub port
-- Likely spelling matches such as `turretMotor` versus `turret`
-- Hardware names stored in simple Java `String` constants
+## What it checks
 
-## Requirements
+| Check | Example | What to do |
+| --- | --- | --- |
+| Missing configured name | Java asks for `turretMotor`, config says `turret` | Match the names exactly; they are case-sensitive. |
+| Type mismatch | Code requests a motor, config defines a servo | Verify configuration and Java mapping. |
+| Conflicting code types | Two classes request `feeder` as different device categories | Review both source locations. |
+| Duplicate names or ports | Two devices assigned to a single hub motor port | Confirm active config and intended wiring. |
+| Unused config entry | A configured device is absent from scanned mappings | Review whether it is intentionally unused or code is missing. |
+| Configuration drift | `intake` moved from motor 1 to motor 2 | Check the electrical change and update records. |
+| Dynamic name | A hardware name is assembled at runtime | Review manually; the scanner does not guess. |
 
-- macOS, Windows, or Linux
-- Python 3.10 or newer
-- No external Python packages
+**Static analysis limitation:** A name present in both code and the config is not proof the motor is plugged into the stated port or turns the right way. Continue with an on-robot hardware check for motor direction, encoders, sensors, and mechanism movement. Java expressions built dynamically may require manual review. XML schemas and third-party device types vary; an unknown type is reported without claiming compatibility.
 
-## Easiest method: browser interface
+## Command line for CI or power users
 
-No Terminal is required:
-
-1. Double-click `FTC-Config-Guard.html`.
-2. If macOS asks which application to use, choose Chrome.
-3. Press **Choose the FTC repository** and select the complete repository
-   folder.
-4. Press **Choose the robot configuration** and select a JSON, CSV, or FTC XML
-   file.
-5. Press **Run configuration scan**.
-6. Review the colour-coded findings or download the Markdown report.
-
-All processing happens locally inside the browser. The selected private team
-code is not uploaded anywhere.
-
-## Command-line method
-
-Open Terminal and move into this tool's folder:
+Requires Python 3.10+; no third-party packages:
 
 ```bash
-cd /path/to/FTC-Robot-Configuration-Guard
+python3 config_guard.py --repo /path/to/FTC-project --config /path/to/active.xml \
+  --baseline /path/to/previous.xml \
+  --report report.md --json-report report.json
 ```
 
-Run it against the cloned Aimbot repository using the included example wiring
-file:
+Omit `--baseline` if there is no previous configuration. `--strict-warnings` makes warnings fail the command. Exit status `0` means no errors, `1` means scanner errors (or strict warnings), and `2` means invalid input. A zero exit status is **not** a physical robot test.
 
-```bash
-python3 config_guard.py \
-  --repo "$HOME/Documents/GitHub/ClonedFTCController" \
-  --config example_robot_config.json \
-  --report aimbot-config-report.md
-```
+### Input formats
 
-Replace the repository path if GitHub Desktop saved it elsewhere.
+- **FTC XML:** named device elements from a saved Robot Controller configuration; use the *active* configuration where possible.
+- **JSON:** an array or `{ "devices": [...] }`; each row needs `name` and may include `type`, `hub`, `port_type`, and `port`. See [`example_robot_config.json`](example_robot_config.json).
+- **CSV:** header `name,type,hub,port_type,port`. Each row represents one device.
 
-Exit codes:
-
-- `0`: no errors
-- `1`: errors found, or warnings found when `--strict-warnings` is enabled
-- `2`: invalid path or configuration input
-
-## JSON configuration format
-
-Edit `example_robot_config.json` to match the real Control Hub and Expansion
-Hub wiring. Each device requires `name` and `type`. Hub and port information is
-needed for duplicate-port checking.
+A JSON device example:
 
 ```json
-{
-  "devices": [
-    {
-      "name": "frontLeft",
-      "type": "DcMotorEx",
-      "hub": "Control Hub",
-      "port_type": "motor",
-      "port": 0
-    }
-  ]
-}
+{"name":"frontLeft","type":"DcMotorEx","hub":"Control Hub","port_type":"motor","port":0}
 ```
 
-## CSV configuration format
+### Team workflow
 
-Use this header:
+1. Keep a saved configuration snapshot when the robot wiring changes.
+2. Run the guard on a pull request or before an important deployment.
+3. Review warnings and dynamic names, not just the error count.
+4. Initialize and test every relevant OpMode on the robot; check physical motion and live telemetry.
+5. Save the report with your build/test notes to document what was checked.
 
-```csv
-name,type,hub,port_type,port
-frontLeft,DcMotorEx,Control Hub,motor,0
-```
+## Development
 
-## FTC XML configuration
-
-If the team exports or retrieves the FTC Robot Controller configuration XML,
-pass that file directly:
-
-```bash
-python3 config_guard.py \
-  --repo "/path/to/ClonedFTCController" \
-  --config "/path/to/AimbotRobot.xml" \
-  --report report.md
-```
-
-FTC XML structures can vary by SDK and device. The guard reads named device
-elements and their hub/port attributes, but the generated report should still
-be checked by a programmer and electrical member.
-
-## Recommended team workflow
-
-1. Electrical updates the wiring list whenever a port or device changes.
-2. Programming runs the guard before deploying an important build.
-3. Errors must be resolved before robot initialization.
-4. Warnings are reviewed; some configured devices may intentionally be unused
-   by a particular branch.
-5. Save the Markdown report with test notes or attach it to a pull request.
-
-## Current limitations
-
-- Dynamically generated hardware names cannot always be resolved.
-- Constants with the same Java identifier but different values are ignored to
-  avoid guessing incorrectly.
-- The tool checks configuration agreement, not physical wiring continuity,
-  motor direction, encoder direction, PID tuning, or mechanism performance.
-- XML device type names vary; verify unusual third-party devices manually.
-
-## Run the tests
+The browser app is a standalone HTML file; the CLI implementation is in `config_guard.py`. Both run locally. Tests cover missing names, types, duplicate ports, comments, drift, and unknown types:
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+## License
+
+Code and included original examples are available under the [MIT License](LICENSE). This project is independent and is not affiliated with FIRST.

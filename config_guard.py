@@ -39,7 +39,7 @@ LEGACY_GET_RE = re.compile(
 )
 
 QUOTED_RE = re.compile(r'^\s*"([^\"]+)"\s*$')
-IDENTIFIER_RE = re.compile(r"([A-Za-z_$][\w$]*)\s*$")
+IDENTIFIER_RE = re.compile(r"(?:[A-Za-z_$][\w$]*\s*\.\s*)*([A-Za-z_$][\w$]*)\s*$")
 
 
 @dataclass(frozen=True)
@@ -146,7 +146,7 @@ def resolve_name(expression: str, constants: dict[str, str]) -> str | None:
     quoted = QUOTED_RE.match(expression)
     if quoted:
         return quoted.group(1)
-    identifier = IDENTIFIER_RE.search(expression)
+    identifier = IDENTIFIER_RE.fullmatch(expression)
     if identifier:
         return constants.get(identifier.group(1))
     return None
@@ -220,7 +220,11 @@ def scan_java(repo: Path) -> tuple[list[CodeDevice], list[Finding]]:
 
 def parse_json(path: Path) -> list[ConfigDevice]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    rows = data["devices"] if isinstance(data, dict) else data
+    rows = data.get("devices") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        raise ValueError("JSON configuration must contain a devices array")
+    if any(not isinstance(row, dict) or not row.get("name") for row in rows):
+        raise ValueError("Every configured device needs a nonempty name")
     return [
         ConfigDevice(
             name=str(row["name"]),
@@ -236,6 +240,8 @@ def parse_json(path: Path) -> list[ConfigDevice]:
 def parse_csv(path: Path) -> list[ConfigDevice]:
     with path.open(encoding="utf-8-sig", newline="") as handle:
         rows = csv.DictReader(handle)
+        if not rows.fieldnames or "name" not in rows.fieldnames:
+            raise ValueError("CSV configuration needs a name column")
         return [
             ConfigDevice(
                 name=str(row.get("name", "")),
@@ -345,7 +351,7 @@ def analyze(
                     f"{', '.join(sorted(code_categories))}.",
                 )
             )
-        if code_categories.isdisjoint(config_categories):
+        if code_categories.isdisjoint(config_categories) and "unknown" not in config_categories:
             findings.append(
                 Finding(
                     "ERROR",
@@ -354,7 +360,7 @@ def analyze(
                     f"{', '.join(sorted(config_categories))} in the configuration.",
                 )
             )
-        else:
+        elif not code_categories.isdisjoint(config_categories):
             findings.append(
                 Finding(
                     "PASS",
@@ -362,6 +368,8 @@ def analyze(
                     f"'{name}' exists with a compatible type ({', '.join(sorted(code_categories))}).",
                 )
             )
+        else:
+            findings.append(Finding("INFO", "UNKNOWN_CONFIG_TYPE", f"'{name}' is present, but its configuration type is unknown; verify it on the robot."))
 
     for name, devices in sorted(config_by_name.items()):
         if len(devices) > 1:
@@ -397,6 +405,35 @@ def analyze(
     return sorted(findings, key=lambda item: (severity_order[item.severity], item.code, item.message))
 
 
+def compare_configs(current: list[ConfigDevice], baseline: list[ConfigDevice]) -> list[Finding]:
+    """Describe changes since a known-good configuration, without assuming they are mistakes."""
+    old = {device.name: device for device in baseline}
+    new = {device.name: device for device in current}
+    findings: list[Finding] = []
+    for name in sorted(old.keys() - new.keys()):
+        findings.append(Finding("WARNING", "REMOVED_DEVICE", f"'{name}' was removed since the baseline configuration."))
+    for name in sorted(new.keys() - old.keys()):
+        findings.append(Finding("INFO", "ADDED_DEVICE", f"'{name}' was added since the baseline configuration."))
+    for name in sorted(old.keys() & new.keys()):
+        before, after = old[name], new[name]
+        if type_category(before.device_type) != type_category(after.device_type):
+            findings.append(Finding("WARNING", "TYPE_CHANGED", f"'{name}' changed type: {before.device_type} → {after.device_type}."))
+        if (before.hub, before.port_type, before.port) != (after.hub, after.port_type, after.port):
+            findings.append(Finding("WARNING", "PORT_CHANGED", f"'{name}' moved from {before.hub or '?'} {before.port_type or '?'} {before.port or '?'} to {after.hub or '?'} {after.port_type or '?'} {after.port or '?'}."))
+    return findings
+
+
+def report_data(code_devices: list[CodeDevice], config_devices: list[ConfigDevice], findings: list[Finding]) -> dict:
+    """Stable machine-readable format for CI, scripts, and saved scan comparison."""
+    return {
+        "schema_version": 1,
+        "summary": summary(findings),
+        "mappings": [vars(device) for device in code_devices],
+        "devices": [vars(device) for device in config_devices],
+        "findings": [vars(finding) for finding in findings],
+    }
+
+
 def summary(findings: list[Finding]) -> dict[str, int]:
     counts = {"ERROR": 0, "WARNING": 0, "INFO": 0, "PASS": 0}
     for finding in findings:
@@ -428,7 +465,7 @@ def render_markdown(
     findings: list[Finding],
 ) -> str:
     counts = summary(findings)
-    status = "FAIL" if counts["ERROR"] else "PASS"
+    status = "FAIL" if counts["ERROR"] else "REVIEW" if counts["WARNING"] else "PASS"
     lines = [
         "# FTC Robot Configuration Guard Report",
         "",
@@ -466,6 +503,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--report", type=Path, help="Optional Markdown report output path"
     )
+    parser.add_argument("--json-report", type=Path, help="Optional machine-readable JSON report")
+    parser.add_argument("--baseline", type=Path, help="Optional previous JSON/CSV/XML configuration for drift review")
     parser.add_argument(
         "--strict-warnings",
         action="store_true",
@@ -482,15 +521,25 @@ def main(argv: list[str] | None = None) -> int:
     if not args.config.is_file():
         print(f"ERROR: Configuration file not found: {args.config}", file=sys.stderr)
         return 2
+    if args.baseline and not args.baseline.is_file():
+        print(f"ERROR: Baseline file not found: {args.baseline}", file=sys.stderr)
+        return 2
 
     try:
         code_devices, scan_findings = scan_java(args.repo)
         config_devices = load_config(args.config)
+        baseline_devices = load_config(args.baseline) if args.baseline else None
     except (OSError, ValueError, KeyError, json.JSONDecodeError, ET.ParseError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
 
     findings = analyze(code_devices, config_devices) + scan_findings
+    if not code_devices:
+        findings.append(Finding("WARNING", "NO_MAPPINGS", "No resolvable hardware mappings were found in the scanned Java files; this is not a verified pass."))
+    if not config_devices:
+        findings.append(Finding("WARNING", "EMPTY_CONFIGURATION", "No configured devices were parsed; confirm this is the active robot configuration."))
+    if baseline_devices is not None:
+        findings += compare_configs(config_devices, baseline_devices)
     print(render_terminal(findings))
 
     if args.report:
@@ -506,6 +555,11 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8",
         )
         print(f"\nReport written to: {args.report}")
+
+    if args.json_report:
+        args.json_report.parent.mkdir(parents=True, exist_ok=True)
+        args.json_report.write_text(json.dumps(report_data(code_devices, config_devices, findings), indent=2) + "\n", encoding="utf-8")
+        print(f"JSON report written to: {args.json_report}")
 
     counts = summary(findings)
     if counts["ERROR"] or (args.strict_warnings and counts["WARNING"]):
